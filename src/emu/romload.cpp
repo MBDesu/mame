@@ -26,7 +26,7 @@
 #include <set>
 
 
-#define LOG_LOAD 0
+#define LOG_LOAD 1
 #define LOG(...) do { if (LOG_LOAD) debugload(__VA_ARGS__); } while(0)
 
 
@@ -312,11 +312,10 @@ u32 rom_file_size(const rom_entry *romp)
 
 static void CLIB_DECL ATTR_PRINTF(1,2) debugload(const char *string, ...)
 {
-	static int opened;
 	va_list arg;
 	FILE *f;
 
-	f = fopen("romload.log", opened++ ? "a" : "w");
+	f = fopen("romload.log", "a");
 	if (f)
 	{
 		va_start(arg, string);
@@ -607,6 +606,7 @@ void rom_load_manager::region_post_process(memory_region *region, bool invert)
 	if (region == nullptr)
 		return;
 
+	LOG("post-processing \"%s\"\n", region->name().c_str());
 	LOG("+ datawidth=%dbit endian=%s\n", region->bitwidth(),
 			region->endianness() == ENDIANNESS_LITTLE ? "little" : "big");
 
@@ -732,7 +732,7 @@ int rom_load_manager::read_rom_data(emu_file *file, const rom_entry *parent_regi
 	u32 tempbufsize;
 	int i;
 
-	LOG("Loading ROM data: offs=%X len=%X mask=%02X group=%d skip=%d reverse=%d\n", ROM_GETOFFSET(romp), numbytes, datamask, groupsize, skip, reversed);
+	LOG("Loading ROM data: offs=0x%X len=0x%X mask=0x%02X group=%d skip=%d reverse=%d\n", ROM_GETOFFSET(romp), numbytes, datamask, groupsize, skip, reversed);
 
 	/* make sure the length was an even multiple of the group size */
 	if (numbytes % groupsize != 0)
@@ -763,7 +763,7 @@ int rom_load_manager::read_rom_data(emu_file *file, const rom_entry *parent_regi
 		u8 *bufptr = &tempbuf[0];
 
 		/* read as much as we can */
-		LOG("  Reading %X bytes into buffer\n", bytesleft);
+		LOG("  Reading 0x%X bytes into buffer\n", bytesleft);
 		if (rom_fread(file, bufptr, bytesleft, parent_region) != bytesleft)
 			return 0;
 		numbytes -= bytesleft;
@@ -789,6 +789,7 @@ int rom_load_manager::read_rom_data(emu_file *file, const rom_entry *parent_regi
 
 			/* grouped data -- reversed case */
 			else
+				LOG("  Reversing 0x%X bytes, %d at a time\n", bytesleft, groupsize);
 				while (bytesleft)
 				{
 					for (i = groupsize - 1; i >= 0 && bytesleft; i--, bytesleft--)
@@ -973,7 +974,7 @@ void rom_load_manager::process_rom_entries(std::initializer_list<std::reference_
 				// if this was the first use of this file, verify the length and CRC
 				if (baserom)
 				{
-					LOG("Verifying length (%X) and checksums\n", explength);
+					LOG("Verifying length (0x%X) and checksums\n", explength);
 					verify_length_and_hash(file.get(), baserom->name(), explength, util::hash_collection(baserom->hashdata()));
 					LOG("Verify finished\n");
 				}
@@ -1268,7 +1269,7 @@ void rom_load_manager::load_software_part_region(device_t &device, software_list
 		u32 regionlength = ROMREGION_GETLENGTH(region);
 
 		std::string regiontag = device.subtag(region->name());
-		LOG("Processing region \"%s\" (length=%X)\n", regiontag.c_str(), regionlength);
+		LOG("Processing region \"%s\" (length=0x%X)\n", regiontag.c_str(), regionlength);
 
 		// the first entry must be a region
 		assert(ROMENTRY_ISREGION(region));
@@ -1287,7 +1288,7 @@ void rom_load_manager::load_software_part_region(device_t &device, software_list
 
 		// remember the base and length
 		m_region = machine().memory().region_alloc(regiontag, regionlength, width, endianness);
-		LOG("Allocated %X bytes @ %p\n", m_region->bytes(), m_region->base());
+		LOG("Allocated 0x%X bytes @ %p\n", m_region->bytes(), m_region->base());
 
 		if (ROMREGION_ISERASE(region)) // clear the region if it's requested
 			memset(m_region->base(), ROMREGION_GETERASEVAL(region), m_region->bytes());
@@ -1356,7 +1357,7 @@ void rom_load_manager::process_region_list()
 			u32 regionlength = ROMREGION_GETLENGTH(region);
 
 			std::string regiontag = device.subtag(region->name());
-			LOG("Processing region \"%s\" (length=%X)\n", regiontag.c_str(), regionlength);
+			LOG("Processing region \"%s\" (length=0x%X)\n", regiontag.c_str(), regionlength);
 
 			// the first entry must be a region
 			assert(ROMENTRY_ISREGION(region));
@@ -1370,7 +1371,7 @@ void rom_load_manager::process_region_list()
 
 				// remember the base and length
 				m_region = machine().memory().region_alloc(regiontag, regionlength, width, endianness);
-				LOG("Allocated %X bytes @ %p\n", m_region->bytes(), m_region->base());
+				LOG("Allocated 0x%X bytes @ %p\n", m_region->bytes(), m_region->base());
 
 				if (ROMREGION_ISERASE(region)) // clear the region if it's requested
 					memset(m_region->base(), ROMREGION_GETERASEVAL(region), m_region->bytes());

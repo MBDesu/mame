@@ -114,11 +114,35 @@ the decryption keys.
 
 #include "emu.h"
 #include "cps1.h"
+#include <fstream>
 
 #include "cpu/m68000/m68000.h"
 
 #include "ui/uimain.h"
 
+// #define LOG_LOAD 1
+// #define LOG(...) do { if (LOG_LOAD) debugload(__VA_ARGS__); } while(0)
+// static void CLIB_DECL ATTR_PRINTF(1,2) debugload(const char *string, ...)
+// {
+// 	va_list arg;
+// 	FILE *f;
+
+// 	f = fopen("romload.log", "a");
+// 	if (f)
+// 	{
+// 		va_start(arg, string);
+// 		vfprintf(f, string, arg);
+// 		va_end(arg);
+// 		fclose(f);
+// 	}
+// }
+
+static void write_binary(const char* filename, uint16_t* bytes) {
+	std::ofstream file;
+	file.open(filename, std::ios_base::binary);
+	file.write((const char *) bytes, 0x400000);
+	file.close();
+}
 
 namespace {
 
@@ -159,9 +183,11 @@ struct sbox
 // the above struct better defines how the hardware works, however
 // to speed up the decryption at run time we convert it to the
 // following one
+// int logged = 0;
 class optimised_sbox
 {
 public:
+
 	void optimise(sbox const &in)
 	{
 		// precalculate the input lookup
@@ -181,8 +207,35 @@ public:
 		}
 	}
 
+	// void write_input_lookup() {
+	// 	LOG("input_lookup:\n");
+	// 	for (int i = 0; i < 256; i++) {
+	// 		LOG("%2d ", input_lookup[i]);
+	// 		if ((i + 1) % 16 == 0) {
+	// 			LOG("\n");
+	// 		}
+	// 	}
+	// 	LOG("\n");
+	// }
+
+	// void write_output() {
+	// 	LOG("output:\n");
+	// 	for (int i = 0; i < 64; i++) {
+	// 		LOG("%3d ", output[i]);
+	// 		if ((i + 1) % 16 == 0) {
+	// 			LOG("\n");
+	// 		}
+	// 	}
+	// 	LOG("\n");
+	// }
+
 	uint8_t fn(uint8_t in, uint32_t key) const
 	{
+		// if (logged <= 14) {
+		// 	LOG("\t\t\tin = 0x%X, key = 0x%X; result = 0x%X\n", in, key, output[input_lookup[in] ^ (key & 0x3f)]);
+		// 	LOG("\t\t\tinput_lookup[0x%X] = 0x%X\n", in, input_lookup[in]);
+		// 	LOG("\t\t\toutput[0x%X] = 0x%X\n", (input_lookup[in] ^ (key & 0x3f)), output[input_lookup[in] ^ (key & 0x3f)]);
+		// }
 		return output[input_lookup[in] ^ (key & 0x3f)];
 	}
 
@@ -487,6 +540,12 @@ const sbox fn2_r4_boxes[4] =
 
 uint8_t fn(uint8_t in, const optimised_sbox *sboxes, uint32_t key)
 {
+	// if (logged <= 14) {
+	// 	LOG("\tfn in: 0x%X, fn key: 0x%X\n", in, key);
+	// 	for (int i = 0; i < 4; i++) {
+	// 		LOG("\t\tsboxes[%d].fn(0x%X, 0x%X >> %d) = 0x%X\n", i, in, key, i * 6, sboxes[i].fn(in, key >> i * 6));
+	// 	}
+	// }
 	return
 			sboxes[0].fn(in, key >>  0) |
 			sboxes[1].fn(in, key >>  6) |
@@ -589,18 +648,30 @@ void expand_subkey(uint32_t* subkey, uint16_t seed)
 }
 
 
-
 uint16_t feistel(uint16_t val, const int *bitsA, const int *bitsB,
 		const optimised_sbox* boxes1, const optimised_sbox* boxes2, const optimised_sbox* boxes3, const optimised_sbox* boxes4,
 		uint32_t key1, uint32_t key2, uint32_t key3, uint32_t key4)
 {
 	uint8_t l = bitswap<8>(val, bitsB[7],bitsB[6],bitsB[5],bitsB[4],bitsB[3],bitsB[2],bitsB[1],bitsB[0]);
 	uint8_t r = bitswap<8>(val, bitsA[7],bitsA[6],bitsA[5],bitsA[4],bitsA[3],bitsA[2],bitsA[1],bitsA[0]);
+	// if (logged <= 14) {
+	// 	LOG("val: %d\n", val);
+	// 	LOG("l: %d, r: %d\n", l, r);
+	// 	LOG("bitsB: %d %d %d %d %d %d %d %d\n", bitsB[7],bitsB[6],bitsB[5],bitsB[4],bitsB[3],bitsB[2],bitsB[1],bitsB[0]);
+	// 	LOG("bitsA: %d %d %d %d %d %d %d %d\n", bitsA[7],bitsA[6],bitsA[5],bitsA[4],bitsA[3],bitsA[2],bitsA[1],bitsA[0]);
+	// 	logged++;
+	// }
 
 	l ^= fn(r, boxes1, key1);
 	r ^= fn(l, boxes2, key2);
+	// if (logged <= 14) {
+	// 	LOG("first xor fn: l: 0x%X, r: 0x%X\n", l, r);
+	// }
 	l ^= fn(r, boxes3, key3);
 	r ^= fn(l, boxes4, key4);
+	// if (logged <= 14) {
+	// 	LOG("second xor fn: l: 0x%X, r: 0x%X\n", l, r);
+	// }
 
 	return
 		(BIT(l, 0) << bitsA[0]) |
@@ -634,6 +705,9 @@ void optimise_sboxes(optimised_sbox* out, const sbox* in)
 
 void cps2_decrypt(running_machine &machine, uint16_t *rom, uint16_t *dec, int length, const uint32_t *master_key, uint32_t lower_limit, uint32_t upper_limit)
 {
+	// LOG("+ starting decryption\n");
+	// LOG("+ writing raw binary to file\n");
+	write_binary("vsav_encrypted.bin", rom);
 	optimised_sbox sboxes1[4*4];
 	optimise_sboxes(&sboxes1[0*4], fn1_r1_boxes);
 	optimise_sboxes(&sboxes1[1*4], fn1_r2_boxes);
@@ -646,6 +720,23 @@ void cps2_decrypt(running_machine &machine, uint16_t *rom, uint16_t *dec, int le
 	optimise_sboxes(&sboxes2[2*4], fn2_r3_boxes);
 	optimise_sboxes(&sboxes2[3*4], fn2_r4_boxes);
 
+	// for (int f = 0; f < 4; f++) {
+	// 	int second_digit = f / 4;
+	// 	LOG("sboxes1%d:\n", second_digit);
+	// 	for (int g = 0; g < 4; g++) {
+	// 		sboxes1[f * 4 + 1].write_input_lookup();
+	// 		sboxes1[f * 4 + 1].write_output();
+	// 	}
+	// }
+
+	// for (int f = 0; f < 4; f++) {
+	// 	int second_digit = f / 4;
+	// 	LOG("sboxes1%d:\n", second_digit);
+	// 	for (int g = 0; g < 4; g++) {
+	// 		sboxes2[f * 4 + 1].write_input_lookup();
+	// 		sboxes2[f * 4 + 1].write_output();
+	// 	}
+	// }
 
 	// expand master key to 1st FN 96-bit key
 	uint32_t key1[4];
@@ -673,9 +764,18 @@ void cps2_decrypt(running_machine &machine, uint16_t *rom, uint16_t *dec, int le
 				&sboxes1[0*4], &sboxes1[1*4], &sboxes1[2*4], &sboxes1[3*4],
 				key1[0], key1[1], key1[2], key1[3]);
 
+
+		// if (logged <= 14) {
+		// 	LOG("+ seed = 0x%x\n", seed);
+		// }
 		// expand the result to 64-bit
 		uint32_t subkey[2];
 		expand_subkey(subkey, seed);
+		// if (logged <= 14) {
+		// 	for (int z = 0; z < 2; z++) {
+		// 		LOG("+ subkey[%d] = 0x%x\n", z, subkey[z]);
+		// 	}
+		// }
 
 		// XOR with the master key
 		subkey[0] ^= master_key[0];
@@ -700,9 +800,15 @@ void cps2_decrypt(running_machine &machine, uint16_t *rom, uint16_t *dec, int le
 		{
 			if (a >= lower_limit && a <= upper_limit)
 			{
+				// if (a == upper_limit) {
+				// 	LOG("upper_limit reached\n\ta = 0x%X, rom[0x%X] = 0x%X\n", a, a, rom[a]);
+				// }
 				dec[a] = feistel(rom[a], fn2_groupA, fn2_groupB,
 					&sboxes2[0 * 4], &sboxes2[1 * 4], &sboxes2[2 * 4], &sboxes2[3 * 4],
 					key2[0], key2[1], key2[2], key2[3]);
+				// if (a == upper_limit) {
+				// 	LOG("0x%X overwritten with 0x%X\n", a, dec[a]);
+				// }
 			}
 			else
 			{
@@ -710,4 +816,6 @@ void cps2_decrypt(running_machine &machine, uint16_t *rom, uint16_t *dec, int le
 			}
 		}
 	}
+	write_binary("vsav_decrypted.bin", dec);
+	// LOG("+ decryption done\n");
 }

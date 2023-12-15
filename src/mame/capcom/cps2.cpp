@@ -638,7 +638,16 @@ Stephh's inputs notes (based on some tests on the "parent" set) :
 
 #include "speaker.h"
 
+#include <fstream>
+
 namespace {
+
+static void write_binary(const char* filename, u8* bytes, int length) {
+	std::ofstream file;
+	file.open(filename, std::ios_base::binary);
+	file.write((const char *) bytes, length);
+	file.close();
+}
 
 /*************************************
  *
@@ -803,9 +812,12 @@ void cps2_state::cps2_gfx_decode()
 {
 	const int banksize = 0x200000;
 	const auto size = memregion("gfx")->bytes();
+	write_binary("vsav_gfx_shuffled.bin", memregion("gfx")->base(), 0x2000000);
 
 	for (int i = 0; i < size; i += banksize)
 		unshuffle((uint64_t *)(memregion("gfx")->base() + i), banksize / 8);
+
+	write_binary("vsav_gfx_unshuffled.bin", memregion("gfx")->base(), 0x2000000);
 }
 
 
